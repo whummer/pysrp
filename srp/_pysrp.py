@@ -17,6 +17,7 @@ import hashlib
 import os
 import binascii
 import six
+from binascii import hexlify
 
 SHA1   = 0
 SHA224 = 1
@@ -187,11 +188,71 @@ def HNxorg( hash_class, N, g ):
     return six.b( ''.join( chr( six.indexbytes(hN, i) ^ six.indexbytes(hg, i) ) for i in range(0,len(hN)) ) )
 
 
+# begin added by whummer
+
+def long_to_hex(long_num):
+    return '%x' % long_num
+
+
+def pad_hex(long_int):
+    """
+    Converts a Long integer (or hex string) to hex format padded with zeroes for hashing
+    :param {Long integer|String} long_int Number or string to pad.
+    :return {String} Padded hex string.
+    """
+    hashStr = long_int
+    if isinstance(long_int, six.binary_type):
+        hashStr = long_int.decode('utf-8')
+    elif not isinstance(long_int, six.string_types):
+        hashStr = long_to_hex(long_int)
+    if len(hashStr) % 2 == 1:
+        hashStr = '0%s' % hashStr
+    elif hashStr[0] in '89ABCDEFabcdef':
+        hashStr = '00%s' % hashStr
+    return hashStr
+
+
+def get_hash(buf, hash_class=None):
+    if not hash_class:
+        hash_class = hashlib.sha256
+    a = hash_class(buf).hexdigest()
+    return expand_64(a)
+
+
+def expand_64(a):
+    return (64 - len(a)) * '0' + a
+
+
+def hex_hash(hex_string, hash_class=None):
+    return get_hash(bytearray.fromhex(hex_string), hash_class=hash_class)
+
+
+def hex_to_long(hex_string):
+    return int(hex_string, 16)
+
+
+def calculate_u(big_a, big_b):
+    u_hex_hash = hex_hash(pad_hex(big_a) + pad_hex(big_b))
+    return hex_to_long(u_hex_hash)
+
+
+def to_bytes(obj):
+    if not isinstance(obj, six.string_types):
+        return obj
+    return obj.encode('utf-8')
+
+# end added by whummer
+
 
 def gen_x( hash_class, salt, username, password ):
-    return H( hash_class, salt, H( hash_class, username + six.b(':') + password ) )
-
-
+    pw = H( hash_class, to_bytes(username) + six.b(':') + to_bytes(password) ) 
+    # added/modified by whummer
+    pw = expand_64(long_to_hex(pw))
+    if not isinstance(salt, six.integer_types):
+        salt = bytes_to_long(salt)
+    salt = pad_hex(salt)
+    result = hex_to_long(hex_hash(salt + pw, hash_class=hash_class))
+    return result
 
 
 def create_salted_verification_key( username, password, hash_alg=SHA1, ng_type=NG_2048, n_hex=None, g_hex=None ):
@@ -209,7 +270,7 @@ def create_salted_verification_key( username, password, hash_alg=SHA1, ng_type=N
 def calculate_M( hash_class, N, g, I, s, A, B, K ):
     h = hash_class()
     h.update( HNxorg( hash_class, N, g ) )
-    h.update( hash_class(I).digest() )
+    h.update( hash_class(to_bytes(I)).digest() )
     h.update( long_to_bytes(s) )
     h.update( long_to_bytes(A) )
     h.update( long_to_bytes(B) )
@@ -229,20 +290,25 @@ def calculate_H_AMK( hash_class, A, M, K ):
 
 class Verifier (object):
 
-    def __init__(self, username, bytes_s, bytes_v, bytes_A, hash_alg=SHA1, ng_type=NG_2048, n_hex=None, g_hex=None, bytes_b=None):
+    def __init__(self, username, bytes_s, bytes_v, bytes_A, hash_alg=SHA1,
+            ng_type=NG_2048, n_hex=None, g_hex=None, bytes_b=None, k=None):
         if ng_type == NG_CUSTOM and (n_hex is None or g_hex is None):
             raise ValueError("Both n_hex and g_hex are required when ng_type = NG_CUSTOM")
         if bytes_b and len(bytes_b) != 32:
             raise ValueError("32 bytes required for bytes_b")
-        self.s = bytes_to_long(bytes_s)
-        self.v = bytes_to_long(bytes_v)
+        # self.s = bytes_to_long(bytes_s)
+        self.s = hex_to_long(pad_hex(hexlify(bytes_s)))
+        # self.v = bytes_to_long(bytes_v)
+        self.v = hex_to_long(pad_hex(hexlify(bytes_v)))
         self.I = username
         self.K = None
         self._authenticated = False
 
         N,g        = get_ng( ng_type, n_hex, g_hex )
         hash_class = _hash_map[ hash_alg ]
-        k          = H( hash_class, N, g )
+
+        if k is None:
+            k = H( hash_class, N, g )
 
         self.hash_class = hash_class
         self.N          = N
@@ -257,11 +323,13 @@ class Verifier (object):
         if not self.safety_failed:
 
             if bytes_b:
-                self.b = bytes_to_long(bytes_b)
+                # self.b = bytes_to_long(bytes_b)
+                self.b = hex_to_long(pad_hex(hexlify(bytes_b)))
             else:
                 self.b = get_random_of_length( 32 )
             self.B = (k*self.v + pow(g, self.b, N)) % N
-            self.u = H(hash_class, self.A, self.B)
+            # self.u = H(hash_class, self.A, self.B)
+            self.u = calculate_u(self.A, self.B)
             self.S = pow(self.A*pow(self.v, self.u, N ), self.b, N)
             self.K = hash_class( long_to_bytes(self.S) ).digest()
             self.M = calculate_M( hash_class, N, g, self.I, self.s, self.A, self.B, self.K )
@@ -292,6 +360,7 @@ class Verifier (object):
 
     # returns H_AMK on success, None on failure
     def verify_session(self, user_M):
+        print(user_M, self.M)
         if not self.safety_failed and user_M == self.M:
             self._authenticated = True
             return self.H_AMK
@@ -300,14 +369,16 @@ class Verifier (object):
 
 
 class User (object):
-    def __init__(self, username, password, hash_alg=SHA1, ng_type=NG_2048, n_hex=None, g_hex=None, bytes_a=None):
+    def __init__(self, username, password, hash_alg=SHA1, ng_type=NG_2048, n_hex=None, g_hex=None, bytes_a=None, k=None):
         if ng_type == NG_CUSTOM and (n_hex is None or g_hex is None):
             raise ValueError("Both n_hex and g_hex are required when ng_type = NG_CUSTOM")
         if bytes_a and len(bytes_a) != 32:
             raise ValueError("32 bytes required for bytes_a")
         N,g        = get_ng( ng_type, n_hex, g_hex )
         hash_class = _hash_map[ hash_alg ]
-        k          = H( hash_class, N, g )
+
+        if k is None:
+            k = H( hash_class, N, g )
 
         self.I     = username
         self.p     = password

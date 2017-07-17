@@ -35,8 +35,8 @@ please refer to the `srp module documentation`_.
 
 '''
 
-setup(name             = 'srp',
-      version          = '1.0.7',
+setup(name             = 'srp-ext',
+      version          = '1.0.7.1',
       description      = 'Secure Remote Password',
       author           = 'Tom Cocagne',
       author_email     = 'tom.cocagne@gmail.com',

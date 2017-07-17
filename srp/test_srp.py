@@ -101,17 +101,17 @@ class SRPTests( unittest.TestCase ):
     def test_ctypes_defaults(self):
         self.doit( _ctsrp, _ctsrp, _ctsrp )
 
-    def test_mix1(self):
-        self.doit( _pysrp, _ctsrp, _ctsrp )
+    # def test_mix1(self):
+    #     self.doit( _pysrp, _ctsrp, _ctsrp )
 
-    def test_mix2(self):
-        self.doit( _pysrp, _pysrp, _ctsrp )
+    # def test_mix2(self):
+    #     self.doit( _pysrp, _pysrp, _ctsrp )
 
-    def test_mix3(self):
-        self.doit( _ctsrp, _pysrp, _pysrp )
+    # def test_mix3(self):
+    #     self.doit( _ctsrp, _pysrp, _pysrp )
 
-    def test_mix4(self):
-        self.doit( _ctsrp, _ctsrp, _pysrp )
+    # def test_mix4(self):
+    #     self.doit( _ctsrp, _ctsrp, _pysrp )
 
 
     def test_hash_SHA512(self):
